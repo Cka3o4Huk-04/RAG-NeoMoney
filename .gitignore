@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Файлы конфигурации с секретами
+.env
+
+# Данные ChromaDB
+chroma_db/
+
+# Кеш
+cache.json
+
+# База данных логов
+logs.db
+*.db
+
+# Временные CSV файлы логов
+logs_*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
