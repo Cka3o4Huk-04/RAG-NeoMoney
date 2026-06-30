@@ -90,6 +90,31 @@ class DocumentLoader:
         if file_path.name.startswith('.') or file_path.name.startswith('_'):
             return None
         
+        # Пропускаем файлы ChromaDB
+        if 'chroma_db' in str(file_path).lower():
+            return None
+        
+        try:
+            if extension == '.txt':
+                return self._load_txt(file_path)
+            elif extension == '.csv':
+                return self._load_csv(file_path)
+            elif extension == '.json':
+                return self._load_json(file_path)
+            elif extension == '.pdf':
+                return self._load_pdf(file_path)
+            elif extension == '.docx':
+                return self._load_docx(file_path)
+            elif extension in ['.md', '.markdown']:
+                return self._load_txt(file_path)  # Markdown как текст
+            else:
+                logger.debug(f"Неподдерживаемый формат файла: {file_path.name}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке {file_path.name}: {e}")
+            return None
+
     def _load_txt(self, file_path: Path) -> Tuple[str, str, Dict]:
         """Загружает текстовый файл."""
         with open(file_path, "r", encoding="utf-8") as f:
@@ -171,6 +196,10 @@ class DocumentLoader:
                     lines.append(f"{indent}{key}: {value}")
         elif isinstance(data, list):
             for i, item in enumerate(data, 1):
+                lines.append(f"{indent}{i}. {self._json_to_text(item, prefix, depth + 1)}")
+        
+        return "\n".join(lines)
+
     def _load_pdf(self, file_path: Path) -> Optional[Tuple[str, str, Dict]]:
         """Загружает PDF файл (требует библиотеку PyPDF2)."""
         try:
@@ -245,36 +274,3 @@ class DocumentLoader:
         all_docs = self.load_all_documents()
         return [(text, source, meta) for text, source, meta in all_docs 
                 if meta.get("file_type") == file_type]
-                if isinstance(item, (dict, list)):
-                    lines.append(f"{indent}[{i}]:")
-                    lines.append(self._json_to_text(item, prefix, depth + 1))
-                else:
-                    lines.append(f"{indent}[{i}]: {item}")
-        else:
-            lines.append(f"{indent}{data}")
-        
-        return "\n".join(lines)
-        # Пропускаем файлы ChromaDB
-        if 'chroma_db' in str(file_path).lower():
-            return None
-        
-        try:
-            if extension == '.txt':
-                return self._load_txt(file_path)
-            elif extension == '.csv':
-                return self._load_csv(file_path)
-            elif extension == '.json':
-                return self._load_json(file_path)
-            elif extension == '.pdf':
-                return self._load_pdf(file_path)
-            elif extension == '.docx':
-                return self._load_docx(file_path)
-            elif extension in ['.md', '.markdown']:
-                return self._load_txt(file_path)  # Markdown как текст
-            else:
-                logger.debug(f"Неподдерживаемый формат файла: {file_path.name}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Ошибка при загрузке {file_path.name}: {e}")
-            return None
