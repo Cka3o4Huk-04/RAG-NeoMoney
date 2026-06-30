@@ -537,14 +537,23 @@ def main():
         print("\n" + "=" * 70)
         print("ВЫБОР РЕЖИМА РАБОТЫ")
         print("=" * 70)
-        print("\n1. Интерактивный режим - задавайте свои вопросы")
-        print("2. Демонстрационный режим - готовые примеры вопросов")
-        if telegram_token:
-            print("3. Telegram бот - запуск бота для Telegram")
-        print("4. Синхронизация с GitHub - обновить базу знаний и промпты")
-        print()
+        # Проверяем, запущены ли мы в режиме сервиса (без интерактива)
+        bot_mode = os.getenv("BOT_MODE", "").lower()
+        is_headless = not os.isatty(0)  # Нет терминала - значит сервис
         
-        mode = input("Выберите режим (1, 2" + (", 3" if telegram_token else "") + ", 4, по умолчанию 1): ").strip()
+        if is_headless or bot_mode == "telegram":
+            # Автоматически запускаем Telegram бота
+            mode = '3'
+            print("🤖 Автоматический запуск Telegram бота (режим сервиса)...")
+        else:
+            print("\n1. Интерактивный режим - задавайте свои вопросы")
+            print("2. Демонстрационный режим - готовые примеры вопросов")
+            if telegram_token:
+                print("3. Telegram бот - запуск бота для Telegram")
+            print("4. Синхронизация с GitHub - обновить базу знаний и промпты")
+            print()
+            
+            mode = input("Выберите режим (1, 2" + (", 3" if telegram_token else "") + ", 4, по умолчанию 1): ").strip()
         
         if mode == '2':
             demo_mode(rag_assistant, cache, db_logger)
