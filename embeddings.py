@@ -73,18 +73,23 @@ class VectorStore:
         
         logger.info(f"✓ ChromaDB инициализирована. Документов в коллекции: {self.collection.count()}")
     
-    def _create_chunks(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+    def _create_chunks(self, text: str, chunk_size: int = None, overlap: int = None) -> List[str]:
         """
         Разбивает текст на чанки (фрагменты) с перекрытием.
         
         Args:
             text: Исходный текст
-            chunk_size: Размер чанка в символах
-            overlap: Размер перекрытия между чанками
+            chunk_size: Размер чанка в символах (если None, берется из переменной окружения)
+            overlap: Размер перекрытия между чанками (если None, берется из переменной окружения)
             
         Returns:
             Список чанков текста
         """
+        # Получаем значения из переменной окружения, если не переданы
+        if chunk_size is None:
+            chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
+        if overlap is None:
+            overlap = int(os.getenv("CHUNK_OVERLAP", "50"))
         chunks = []
         start = 0
         

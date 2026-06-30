@@ -20,6 +20,9 @@ from db_logger import DatabaseLogger
 from telegram_bot import TelegramRAGBot
 from prompt_loader import PromptLoader
 from document_loader import DocumentLoader
+from github_sync import GitHubSync
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime
 
 # Настраиваем базовое логирование
 logging.basicConfig(
@@ -31,6 +34,12 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Глобальные настройки RAG (считываются из .env)
+rag_top_k: int = 3
+min_relevance_score: float = 0.5
+chunk_size: int = 500
+chunk_overlap: int = 50
 
 
 def initialize_system():
@@ -77,6 +86,15 @@ def initialize_system():
     embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     llm_model = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
     temperature = float(os.getenv("TEMPERATURE", "0.7"))
+    
+    # Настройки качества RAG (обновляем глобальные переменные)
+    global rag_top_k, min_relevance_score, chunk_size, chunk_overlap
+    rag_top_k = int(os.getenv("RAG_TOP_K", "3"))
+    min_relevance_score = float(os.getenv("MIN_RELEVANCE_SCORE", "0.5"))
+    chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
+    chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "50"))
+    
+    logger.info(f"Настройки RAG: top_k={rag_top_k}, min_relevance={min_relevance_score}, chunk_size={chunk_size}, overlap={chunk_overlap}")
     
     # 1. Инициализируем кеш для хранения ответов
     logger.info("[1/5] Инициализация кеша...")
@@ -205,7 +223,7 @@ def answer_question(
         try:
             answer, search_results = rag_assistant.generate_response(
                 query=query,
-                top_k=3,
+                top_k=rag_top_k,
                 verbose=True
             )
             
@@ -239,7 +257,168 @@ def answer_question(
     return answer
 
 
-def interactive_mode(rag_assistant: RAGAssistant, cache: ResponseCache, logger: DatabaseLogger):
+def sync_with_github(vector_store, rag_assistant):
+    """
+    Синхронизация с GitHub и обновление RAG системы.
+    """
+    print("\n" + "=" * 70)
+    print("🔄 СИНХРОНИЗАЦИЯ С GITHUB")
+    print("=" * 70)
+    
+    repo_url = os.getenv("GITHUB_REPO_URL", "https://github.com/Cka3o4Huk-04/RAG-NeoMoney")
+    
+    syncer = GitHubSync(repo_url=repo_url)
+    
+    # Проверяем наличие обновлений
+    print("\nПроверка обновлений...")
+    has_updates = syncer.check_for_updates()
+    
+    if has_updates:
+        print("\n⚠️ Обнаружены обновления в репозитории!")
+        confirm = input("Скачать и применить обновления? (y/n): ").strip().lower()
+        if confirm in ['y', 'yes', 'д', 'да']:
+            print("\nНачало синхронизации...")
+            kb_updated, prompts_updated = syncer.sync_with_rag_update(vector_store)
+            
+            if kb_updated or prompts_updated:
+                print("\n✅ Синхронизация завершена!")
+                if kb_updated:
+                    print("  • База знаний обновлена")
+                if prompts_updated:
+                    print("  • Промпты обновлены")
+            else:
+                print("\n⚠️ Синхронизация не удалась")
+        else:
+            print("\nСинхронизация отменена пользователем")
+    else:
+        print("\n✅ Обновлений не обнаружено. Система актуальна.")
+    
+    print("=" * 70)
+
+
+def auto_sync_job(vector_store, rag_assistant, db_logger):
+    """
+    Задача для автоматической синхронизации с GitHub.
+    Вызывается планировщиком в заданное time.
+    """
+    logger.info("=" * 70)
+    logger.info("🔄 АВТОМАТИЧЕСКАЯ СИНХРОНИЗАЦИЯ (3:00)")
+    logger.info("=" * 70)
+    
+    repo_url = os.getenv("GITHUB_REPO_URL", "https://github.com/Cka3o4Huk-04/RAG-NeoMoney")
+    admin_id = os.getenv("TELEGRAM_ADMIN_ID")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    
+    syncer = GitHubSync(repo_url=repo_url)
+    
+    try:
+        # Проверяем наличие обновлений
+        logger.info("Проверка обновлений...")
+        has_updates = syncer.check_for_updates()
+        
+        if has_updates:
+            logger.info("⚠️ Обнаружены обновления в репозитории!")
+            
+            # Выполняем синхронизацию
+            kb_updated, prompts_updated = syncer.sync_with_rag_update(vector_store)
+            
+            if kb_updated or prompts_updated:
+                logger.info("✅ Синхронизация завершена!")
+                if kb_updated:
+                    logger.info("  • База знаний обновлена")
+                if prompts_updated:
+                    logger.info("  • Промпты обновлены")
+                
+                # Отправляем уведомление администратору
+                if admin_id and bot_token:
+                    try:
+                        send_telegram_notification(bot_token, admin_id, 
+                            "✅ Автоматическая синхронизация завершена!\n\n"
+                            + ("База знаний обновлена\n" if kb_updated else "")
+                            + ("Промпты обновлены\n" if prompts_updated else "")
+                        )
+                    except Exception as e:
+                        logger.warning(f"Не удалось отправить уведомление: {e}")
+            else:
+                logger.warning("⚠️ Синхронизация не удалась")
+                if admin_id and bot_token:
+                    try:
+                        send_telegram_notification(bot_token, admin_id,
+                            "⚠️ Автоматическая синхронизация не удалась!"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Не удалось отправить уведомление: {e}")
+        else:
+            logger.info("✅ Обновлений не обнаружено. Система актуальна.")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при автоматической синхронизации: {e}", exc_info=True)
+        if admin_id and bot_token:
+            try:
+                send_telegram_notification(bot_token, admin_id,
+                    f"❌ Ошибка автоматической синхронизации: {str(e)}"
+                )
+            except Exception as e2:
+                logger.warning(f"Не удалось отправить уведомление: {e2}")
+
+
+def send_telegram_notification(bot_token, chat_id, message):
+    """
+    Отправляет уведомление в Telegram.
+    """
+    import asyncio
+    from telegram import Bot
+    
+    async def send():
+        bot = Bot(token=bot_token)
+        await bot.send_message(chat_id=chat_id, text=message)
+    
+    asyncio.run(send())
+    logger.info(f"Уведомление отправлено в Telegram (chat_id: {chat_id})")
+def setup_auto_sync(vector_store, rag_assistant, db_logger):
+    """
+    Настраивает автоматическую синхронизацию по расписанию.
+    """
+    auto_sync_enabled = os.getenv("AUTO_SYNC_ENABLED", "false").lower() == "true"
+    auto_sync_time = os.getenv("AUTO_SYNC_TIME", "03:00")
+    
+    if not auto_sync_enabled:
+        logger.info("Автоматическая синхронизация отключена (AUTO_SYNC_ENABLED=false)")
+        return None
+    
+    try:
+        # Парсим время (формат ЧЧ:ММ)
+        hour, minute = map(int, auto_sync_time.split(':'))
+        
+        # Создаем планировщик
+        scheduler = AsyncIOScheduler()
+        
+        # Добавляем задачу на ежедневное выполнение в заданное time
+        scheduler.add_job(
+            auto_sync_job,
+            'cron',
+            hour=hour,
+            minute=minute,
+            args=[vector_store, rag_assistant, db_logger],
+            id='auto_sync_github',
+            name='Автоматическая синхронизация с GitHub',
+            replace_existing=True
+        )
+        
+        # Запускаем планировщик
+        scheduler.start()
+        
+        logger.info(f"✅ Автоматическая синхронизация настроена на {auto_sync_time}")
+        logger.info(f"   Следующий запуск: {scheduler.get_job('auto_sync_github').next_run_time}")
+        
+        return scheduler
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка при настройке автоматической синхронизации: {e}")
+        return None
+
+
+def interactive_mode(rag_assistant: RAGAssistant, cache: ResponseCache, logger: DatabaseLogger, vector_store=None):
     """
     Интерактивный режим общения с ассистентом.
     
@@ -362,9 +541,10 @@ def main():
         print("2. Демонстрационный режим - готовые примеры вопросов")
         if telegram_token:
             print("3. Telegram бот - запуск бота для Telegram")
+        print("4. Синхронизация с GitHub - обновить базу знаний и промпты")
         print()
         
-        mode = input("Выберите режим (1, 2" + (", 3" if telegram_token else "") + ", по умолчанию 1): ").strip()
+        mode = input("Выберите режим (1, 2" + (", 3" if telegram_token else "") + ", 4, по умолчанию 1): ").strip()
         
         if mode == '2':
             demo_mode(rag_assistant, cache, db_logger)
@@ -386,8 +566,18 @@ def main():
                 logger=db_logger
             )
             bot.run()
+        elif mode == '4':
+            sync_with_github(vector_store, rag_assistant)
         else:
-            interactive_mode(rag_assistant, cache, db_logger)
+            # Настраиваем автоматическую синхронизацию
+            scheduler = setup_auto_sync(vector_store, rag_assistant, db_logger)
+            
+            try:
+                interactive_mode(rag_assistant, cache, db_logger, vector_store)
+            finally:
+                # Останавливаем планировщик при выходе
+                if scheduler:
+                    scheduler.shutdown()
         
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}", exc_info=True)

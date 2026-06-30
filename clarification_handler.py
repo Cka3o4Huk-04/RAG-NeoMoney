@@ -24,15 +24,18 @@ class ClarificationHandler:
     2. Если после всех попыток ответ не найден, отправляет вопрос администратору в Telegram
     """
     
-    def __init__(self, max_attempts: int = 2, min_relevance_score: float = 0.5):
+    def __init__(self, max_attempts: int = 2, min_relevance_score: float = None):
         """
         Инициализация обработчика сложных вопросов.
         
         Args:
             max_attempts: Максимальное количество попыток уточнения вопроса
-            min_relevance_score: Минимальный порог релевантности (0.0-1.0)
+            min_relevance_score: Минимальный порог релевантности (0.0-1.0). 
+                                 Если None, берется из переменной окружения MIN_RELEVANCE_SCORE
         """
         self.max_attempts = max_attempts
+        if min_relevance_score is None:
+            min_relevance_score = float(os.getenv("MIN_RELEVANCE_SCORE", "0.5"))
         self.min_relevance_score = min_relevance_score
         
         # Хранилище попыток для каждого пользователя/сессии
