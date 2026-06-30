@@ -128,7 +128,7 @@ class VectorStore:
         Добавляет документы в векторное хранилище.
         
         Args:
-            documents: Список кортежей (название_документа, текст_документа)
+            documents: Список кортежей (текст, источник, метаданные)
         """
         all_chunks = []
         all_metadatas = []
@@ -138,16 +138,20 @@ class VectorStore:
         
         logger.info(f"Добавление {len(documents)} документов в ChromaDB...")
         
-        for doc_name, doc_text in documents:
+        for doc_text, doc_name, doc_metadata in documents:
             chunks = self._create_chunks(doc_text)
             logger.info(f"  • {doc_name}: {len(chunks)} чанков")
             
             for chunk in chunks:
                 all_chunks.append(chunk)
-                all_metadatas.append({
+                metadata = {
                     "source": doc_name,
                     "chunk_length": len(chunk)
-                })
+                }
+                # Добавляем дополнительные метаданные из документа
+                if doc_metadata:
+                    metadata.update(doc_metadata)
+                all_metadatas.append(metadata)
                 all_ids.append(f"chunk_{chunk_id}")
                 chunk_id += 1
         
