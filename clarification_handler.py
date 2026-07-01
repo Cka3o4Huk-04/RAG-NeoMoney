@@ -73,6 +73,19 @@ class ClarificationHandler:
         self, 
         search_results: List[Tuple[str, str, float]], 
         user_id: str = "default"
+    ) -> bool:
+        """
+        Проверяет, требуется ли уточнение вопроса.
+        
+        Args:
+            search_results: Результаты поиска (текст, источник, расстояние)
+            user_id: ID пользователя/сессии
+            
+        Returns:
+            True если вопрос требует уточнения, False если ответ найден
+        """
+        return not self.is_question_clear(search_results, user_id)
+    
     def add_attempt(self, user_id: str, question: str, best_score: float):
         """
         Добавляет попытку уточнения вопроса.
@@ -159,6 +172,20 @@ class ClarificationHandler:
             
         Returns:
             Список попыток
+        """
+        return self.attempt_history.get(user_id, [])
+    
+    def clear_history(self, user_id: str):
+        """
+        Очищает историю попыток для пользователя.
+        
+        Args:
+            user_id: ID пользователя/сессии
+        """
+        if user_id in self.attempt_history:
+            del self.attempt_history[user_id]
+            logger.info(f"История для {user_id} очищена")
+    
     def format_question_report(self, user_id: str, original_question: str) -> str:
         """
         Форматирует отчет о сложных вопросах для отправки администратору.
@@ -234,28 +261,3 @@ class ClarificationHandler:
         except Exception as e:
             logger.error(f"Ошибка при отправке вопроса администратору: {e}")
             return False
-        """
-        return self.attempt_history.get(user_id, [])
-    
-    def clear_history(self, user_id: str):
-        """
-        Очищает историю попыток для пользователя.
-        
-        Args:
-            user_id: ID пользователя/сессии
-        """
-        if user_id in self.attempt_history:
-            del self.attempt_history[user_id]
-            logger.info(f"История для {user_id} очищена")
-    ) -> bool:
-        """
-        Определяет, нужно ли уточнение вопроса.
-        
-        Args:
-            search_results: Результаты поиска
-            user_id: ID пользователя/сессии
-            
-        Returns:
-            True если вопрос требует уточнения, False иначе
-        """
-        return not self.is_question_clear(search_results, user_id)
