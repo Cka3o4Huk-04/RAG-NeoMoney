@@ -144,7 +144,7 @@ class TelegramRAGBot:
             model = self.rag_assistant.model
             
             # Получаем статистику из логов
-            log_stats = self.logger.get_stats()
+            log_stats = self.logger_db.get_stats()
             
             stats_message = f"""
 📊 СТАТИСТИКА СИСТЕМЫ:
@@ -241,7 +241,7 @@ class TelegramRAGBot:
             user_id = str(update.effective_user.id)
             
             # Экспортируем логи текущего пользователя
-            csv_content = self.logger.export_to_csv(user_id=user_id)
+            csv_content = self.logger_db.export_to_csv(user_id=user_id)
             
             if not csv_content:
                 await update.message.reply_text(
@@ -306,7 +306,7 @@ class TelegramRAGBot:
             response_time_ms = int((time.time() - start_time) * 1000)
             
             # Логируем взаимодействие
-            self.logger.log_interaction(
+            self.logger_db.log_interaction(
                 query=user_message,
                 response=answer,
                 source="telegram",
@@ -372,7 +372,7 @@ class TelegramRAGBot:
             await update.message.reply_text(error_message)
             
             # Логируем ошибку
-            self.logger.log_interaction(
+            self.logger_db.log_interaction(
                 query=user_message,
                 response=error_message,
                 source="telegram",
