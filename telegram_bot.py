@@ -11,11 +11,12 @@ import signal
 import sys
 import time
 from typing import Optional
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes
 )
@@ -39,7 +40,8 @@ class TelegramRAGBot:
         token: str,
         rag_assistant: RAGAssistant,
         cache: ResponseCache,
-        logger: DatabaseLogger
+        logger: DatabaseLogger,
+        admin_id: Optional[str] = None
     ):
         """
         Инициализация Telegram бота.
@@ -49,10 +51,16 @@ class TelegramRAGBot:
             rag_assistant: Экземпляр RAG-ассистента
             cache: Экземпляр кеша ответов
             logger: Экземпляр логгера базы данных
+            admin_id: ID администратора для эскалации вопросов
         """
         self.rag_assistant = rag_assistant
         self.cache = cache
-        self.logger = logger
+        self.logger_db = logger
+        self.admin_id = admin_id
+        
+        # Словарь для хранения ожидающих подтверждения эскалации
+        # {user_id: {"query": query, "message_id": message_id}}
+        self.escalation_pending = {}
         
         # Создаем приложение Telegram
         self.application = Application.builder().token(token).build()
@@ -66,6 +74,11 @@ class TelegramRAGBot:
         # Регистрируем обработчик текстовых сообщений
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
+        )
+        
+        # Регистрируем обработчик callback-запросов (для кнопок эскалации)
+        self.application.add_handler(
+            CallbackQueryHandler(self.handle_escalation_callback)
         )
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -156,6 +169,72 @@ class TelegramRAGBot:
             logger.error(f"Ошибка при получении статистики: {e}")
             await update.message.reply_text(f"❌ Ошибка при получении статистики: {str(e)}")
     
+    async def handle_escalation_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик callback-запросов для эскалации вопросов администратору"""
+        query = update.callback_query
+        user = update.effective_user
+        user_id = str(user.id)
+        
+        await query.answer()  # Показываем, что бот обработал нажатие
+        
+        if user_id not in self.escalation_pending:
+            await query.edit_message_text("❌ Сессия эскалации истекла. Пожалуйста, задайте вопрос заново.")
+            return
+        
+        escalation_data = self.escalation_pending[user_id]
+        action = query.data
+        
+        if action == "escalate_yes":
+            # Отправляем вопрос администратору
+            try:
+                admin_message = f"""
+📨 НОВЫЙ ВОПРОС ОТ ПОЛЬЗОВАТЕЛЯ
+
+👤 Пользователь: {escalation_data['username']} (ID: {user_id})
+📝 Вопрос: {escalation_data['query']}
+⏰ Время: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(escalation_data['timestamp']))}
+
+Пожалуйста, ответьте пользователю напрямую в Telegram.
+"""
+                
+                await context.bot.send_message(
+                    chat_id=self.admin_id,
+                    text=admin_message.strip()
+                )
+                
+                # Обновляем сообщение пользователя
+                await query.edit_message_text(
+                    "✅ Ваш вопрос успешно отправлен администратору! Ожидайте ответа."
+                )
+                
+                # Логируем эскалацию
+                self.logger_db.log_interaction(
+                    query=escalation_data['query'],
+                    response="ESCALATED_TO_ADMIN",
+                    source="telegram_escalation",
+                    user_id=user_id,
+                    username=escalation_data['username'],
+                    from_cache=False,
+                    response_time_ms=0
+                )
+                
+                logger.info(f"Вопрос от {escalation_data['username']} эскалирован администратору")
+                
+            except Exception as e:
+                logger.error(f"Ошибка при отправке вопроса администратору: {e}")
+                await query.edit_message_text(
+                    "❌ Произошла ошибка при отправке вопроса администратору. Попробуйте ещё раз."
+                )
+        
+        elif action == "escalate_no":
+            # Пользователь отказался от эскалации
+            await query.edit_message_text(
+                "👍 Хорошо! Если у вас появятся ещё вопросы — обращайтесь."
+            )
+        
+        # Удаляем запись из pending
+        del self.escalation_pending[user_id]
+    
     async def logs_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /logs - экспорт логов в CSV"""
         try:
@@ -211,11 +290,14 @@ class TelegramRAGBot:
                 answer = cached_answer
             else:
                 # Выполняем RAG запрос
-                answer, _ = self.rag_assistant.generate_response(
+                answer, search_results = self.rag_assistant.generate_response(
                     query=user_message,
                     top_k=3,
                     verbose=False
                 )
+                
+                # Проверяем, найден ли ответ (если search_results пустой - ответ не найден)
+                answer_not_found = not search_results or "релевантных документов не найдено" in answer.lower()
                 
                 # Сохраняем в кеш
                 self.cache.set(user_message, answer)
@@ -251,6 +333,38 @@ class TelegramRAGBot:
             # Добавляем индикатор, если ответ из кеша
             if from_cache:
                 await update.message.reply_text("💾 (ответ из кеша)", quote=False)
+            
+            # Если ответ не найден и настроен admin_id, предлагаем эскалацию
+            if answer_not_found and self.admin_id:
+                # Сохраняем вопрос для возможной эскалации
+                self.escalation_pending[user_id] = {
+                    "query": user_message,
+                    "username": username,
+                    "user_first_name": user.first_name,
+                    "timestamp": time.time()
+                }
+                
+                # Отправляем сообщение с предложением эскалации
+                escalation_text = """
+⚠️ К сожалению, я не нашёл ответ на ваш вопрос in базе знаний.
+
+Хотите, чтобы я передал ваш вопрос администратору?
+"""
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Да, отправить администратору", callback_data="escalate_yes"),
+                        InlineKeyboardButton("❌ Нет, спасибо", callback_data="escalate_no")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                escalation_msg = await update.message.reply_text(
+                    escalation_text.strip(), 
+                    reply_markup=reply_markup
+                )
+                
+                # Сохраняем message_id для последующего редактирования/удаления
+                self.escalation_pending[user_id]["message_id"] = escalation_msg.message_id
         
         except Exception as e:
             logger.error(f"Ошибка при обработке запроса: {e}")

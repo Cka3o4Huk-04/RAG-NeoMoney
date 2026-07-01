@@ -35,6 +35,7 @@ class AppConfig:
     
     # Telegram
     telegram_bot_token: Optional[str] = None
+    telegram_admin_id: Optional[str] = None
     
     @property
     def api_key(self) -> Optional[str]:
@@ -111,6 +112,7 @@ class AppConfig:
         
         # Telegram
         config.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        config.telegram_admin_id = os.getenv("TELEGRAM_ADMIN_ID")
         
         return config
     
@@ -125,6 +127,7 @@ class AppConfig:
         logger.info(f"  Файл кеша: {self.cache_file}")
         logger.info(f"  Файл базы логов: {self.logs_db_file}")
         logger.info(f"  Telegram бот: {'настроен' if self.telegram_bot_token else 'не настроен'}")
+        logger.info(f"  Telegram админ: {'настроен' if self.telegram_admin_id else 'не настроен'}")
 
 
 # Глобальный экземпляр конфигурации

@@ -568,11 +568,13 @@ def main():
             print("\n" + "=" * 70)
             print("🤖 ЗАПУСК TELEGRAM БОТА")
             print("=" * 70)
+            admin_id = os.getenv("TELEGRAM_ADMIN_ID")
             bot = TelegramRAGBot(
                 token=telegram_token,
                 rag_assistant=rag_assistant,
                 cache=cache,
-                logger=db_logger
+                logger=db_logger,
+                admin_id=admin_id
             )
             bot.run()
         elif mode == '4':
