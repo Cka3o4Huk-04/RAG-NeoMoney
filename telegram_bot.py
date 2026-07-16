@@ -332,7 +332,7 @@ class TelegramRAGBot:
             
             # Добавляем индикатор, если ответ из кеша
             if from_cache:
-                await update.message.reply_text("💾 (ответ из кеша)", quote=False)
+                await update.message.chat.send_message("💾 (ответ из кеша)")
             
             # Если ответ не найден и настроен admin_id, предлагаем эскалацию
             if answer_not_found and self.admin_id:
